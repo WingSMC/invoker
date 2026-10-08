@@ -1,5 +1,9 @@
 {
   "npm.scriptRunner": "vp",
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "[javascript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"

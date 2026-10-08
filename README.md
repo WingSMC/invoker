@@ -219,10 +219,27 @@ The built-in `openAIAdapter()` is exported. To support another provider, pass `{
 
 ```sh
 vp install
-vp run check   # formatting, lint, TypeScript 7 native compiler
+vp run check   # formatting, lint, TypeScript 6 + Svelte checks
 vp test        # offline unit/stream tests
-vp run build  # Vite+ Pack ESM build + TS7 declaration generation
+vp run build  # Vite+ Pack ESM build + declaration generation
 vp pm pack    # npm tarball; runs prepack
 ```
 
-Type checking uses stable `typescript` 7 (`tsc`). Vite+ Pack emits bundled declarations using its `tsgo` generator with the same compiler package. Vite+ manages builds, tests, formatting, linting, and pnpm. Runtime tests and compile-only SDK/type contracts require no credentials or live API requests.
+Type checking and declaration generation use TypeScript 6. Vite+ manages builds, tests, formatting, linting, and pnpm. Runtime tests and compile-only SDK/type contracts require no credentials or live API requests.
+
+## Demo website
+
+The Svelte 5 + Tailwind 4 site uses the actual library with the internal mock AI service. SVG packets animate the tool-routing diagram; the playground displays streamed arguments, validation, results, and lifecycle events. Syntax-highlighted code tabs show registration, SDK streaming, events, and mock usage. It works without credentials or a backend, supports narrow screens and reduced motion, and makes no external font or AI requests.
+
+```sh
+vp run dev           # local demo with hot reload (http://127.0.0.1:5173)
+vp run site:check    # check Svelte and TypeScript
+vp run site:build    # static site in site-dist/
+vp run site:preview  # preview the production site
+vp exec playwright install chromium
+vp run test:e2e      # production-site browser checks; build it first
+```
+
+`testing/mock-ai.ts` is shared by unit tests and the website, and is excluded from the npm package. `MockAIService.stream()` scripts Chat Completions or Responses events, including text, fragmented/interleaved calls, usage, invalid JSON, truncation, a simulated network failure (`failAfter`), and abortable delays. Defaults are deterministic and zero-latency for tests. `site/demo.ts` connects those streams to real registered Effect handlers. The UI's second mock response is scripted from their actual outcomes.
+
+The [GitHub Pages workflow](.github/workflows/pages.yml) checks pull requests and builds/deploys pushes to `main` (also supports manual dispatch). It uses `site-dist/` as the Pages artifact, separate from the npm library's `dist/`. Relative asset URLs support repository Pages paths and custom domains. Set the repository's **Settings → Pages → Source** to **GitHub Actions** once, then push to `main`. The expected project URL is https://wingsmc.github.io/invoker/.
