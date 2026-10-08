@@ -16,6 +16,8 @@ function registry() {
   invoker.register({
     name: "double",
     description: "Double a number",
+    sideEffects: "None.",
+    returns: { schema: z.number(), description: "The double function result." },
     args: [argument("value", z.number(), "Number")],
     handler,
   });

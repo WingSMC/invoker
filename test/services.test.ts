@@ -17,6 +17,8 @@ it("preserves Effect service requirements and provides them through a typed stre
   invoker.register({
     name: "lookup",
     description: "Look up a record",
+    sideEffects: "None.",
+    returns: { schema: z.string(), description: "The lookup function result." },
     args: [argument("id", z.number(), "Record ID")],
     handler: (id) =>
       Effect.gen(function* () {

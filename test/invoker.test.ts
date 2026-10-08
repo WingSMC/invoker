@@ -11,6 +11,8 @@ function setup(handler = (left: number, right: number) => left + right) {
   const unregister = invoker.register({
     name: "add",
     description: "Add two numbers",
+    sideEffects: "None.",
+    returns: { schema: z.number(), description: "The add function result." },
     args: [
       argument("left", z.number(), "Left operand"),
       argument("right", z.number(), "Right operand"),
@@ -47,7 +49,11 @@ describe("registry and execution", () => {
       invoker.invoke({ ...call, arguments: '{"right":3,"left":2}' }),
     );
     expect(handler).toHaveBeenCalledExactlyOnceWith(2, 3);
-    expect(result).toMatchObject({ value: 5, content: "5", args: { left: 2, right: 3 } });
+    expect(result).toMatchObject({
+      value: 5,
+      content: '{"success":true,"result":5}',
+      args: { left: 2, right: 3 },
+    });
     schemas[0]!.function.parameters.type = "string";
     expect(invoker.toTools()[0]?.function.parameters.type).toBe("object");
   });
@@ -100,6 +106,11 @@ describe("registry and execution", () => {
     invoker.register({
       name: "transform",
       description: "Transform input",
+      sideEffects: "None.",
+      returns: {
+        schema: z.object({ value: z.number(), label: z.string().optional() }),
+        description: "The transform function result.",
+      },
       args: [
         argument(
           "value",
@@ -146,7 +157,14 @@ describe("registry and execution", () => {
   ];
   it.each(handlerFailures)("contains handler failure %#", async (handler, code) => {
     const invoker = new Invoker();
-    invoker.register({ name: "fail", description: "Fails", args: [], handler });
+    invoker.register({
+      name: "fail",
+      description: "Fails",
+      sideEffects: "None.",
+      returns: { schema: z.unknown(), description: "The fail function result." },
+      args: [],
+      handler,
+    });
     const after = vi.fn();
     invoker.onAfterToolCall(after);
     const error = await failure(invoker, { id: "f", name: "fail", arguments: "{}" });
@@ -156,14 +174,16 @@ describe("registry and execution", () => {
 
   it("supports successful promises, Effects, strings, and undefined", async () => {
     for (const [handler, content] of [
-      [() => Promise.resolve(42), "42"],
-      [() => Effect.succeed("hello"), "hello"],
-      [() => undefined, "null"],
+      [() => Promise.resolve(42), '{"success":true,"result":42}'],
+      [() => Effect.succeed("hello"), '{"success":true,"result":"hello"}'],
+      [() => undefined, '{"success":true}'],
     ] as const) {
       const invoker = new Invoker();
-      invoker.register<readonly [], unknown, never>({
+      invoker.register({
         name: "result",
         description: "Return result",
+        sideEffects: "None.",
+        returns: { schema: z.unknown(), description: "The result function result." },
         args: [],
         handler,
       });
@@ -198,7 +218,14 @@ describe("registry and execution", () => {
     expect(invoker.unregister("missing")).toBe(false);
     unregister();
     expect((await failure(invoker, call)).code).toBe("NOT_REGISTERED");
-    invoker.register({ name: "add", description: "Replacement", args: [], handler: () => 1 });
+    invoker.register({
+      name: "add",
+      description: "Replacement",
+      sideEffects: "None.",
+      returns: { schema: z.number(), description: "The add function result." },
+      args: [],
+      handler: () => 1,
+    });
     unregister();
     expect(invoker.has("add")).toBe(true);
     invoker.pause();
@@ -210,18 +237,41 @@ describe("registry and execution", () => {
   it("rejects duplicate names/arguments and missing documentation", () => {
     const { invoker } = setup();
     expect(() =>
-      invoker.register({ name: "add", description: "D", args: [], handler: () => 0 }),
+      invoker.register({
+        name: "add",
+        description: "D",
+        sideEffects: "None.",
+        returns: { schema: z.number(), description: "The add function result." },
+        args: [],
+        handler: () => 0,
+      }),
     ).toThrow("already registered");
     expect(() =>
-      invoker.register({ name: "bad name", description: "D", args: [], handler: () => 0 }),
+      invoker.register({
+        name: "bad name",
+        description: "D",
+        sideEffects: "None.",
+        returns: { schema: z.number(), description: "The bad name function result." },
+        args: [],
+        handler: () => 0,
+      }),
     ).toThrow("Tool names");
     expect(() =>
-      invoker.register({ name: "empty", description: "", args: [], handler: () => 0 }),
+      invoker.register({
+        name: "empty",
+        description: "",
+        sideEffects: "None.",
+        returns: { schema: z.number(), description: "The empty function result." },
+        args: [],
+        handler: () => 0,
+      }),
     ).toThrow("documentation");
     expect(() =>
       invoker.register({
         name: "duplicate",
         description: "D",
+        sideEffects: "None.",
+        returns: { schema: z.number(), description: "The duplicate function result." },
         args: [argument("a", z.string(), "A"), argument("a", z.number(), "B")],
         handler: () => 0,
       }),

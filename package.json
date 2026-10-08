@@ -28,10 +28,10 @@
     "check": "vp check && vp run typecheck && vp run site:check",
     "typecheck": "tsc --noEmit",
     "test": "vp test",
-    "dev": "vp dev --mode site",
+    "dev": "vp run build && vp dev --mode site",
     "test:watch": "vp test watch",
-    "site:dev": "vp dev --mode site",
-    "site:build": "vp build --mode site",
+    "site:dev": "vp run build && vp dev --mode site",
+    "site:build": "vp run build && vp build --mode site",
     "site:preview": "vp preview --mode site",
     "site:check": "svelte-check --tsconfig ./site/tsconfig.json",
     "test:e2e": "playwright test",
@@ -39,6 +39,8 @@
     "prepublishOnly": "vp run build"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@google/genai": "^2.27.0",
     "@playwright/test": "^1.63.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.3",

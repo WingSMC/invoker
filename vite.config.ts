@@ -1,6 +1,8 @@
 import { defineConfig } from "vite-plus";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
+import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 
 export default defineConfig(({ mode }) => ({
   ...(mode === "site"
@@ -8,6 +10,13 @@ export default defineConfig(({ mode }) => ({
         root: "site",
         plugins: [svelte({ configFile: "../svelte.config.js" }), tailwindcss()],
         base: "./",
+        define: {
+          "import.meta.env.VITE_INVOKER_GZIP_KB": JSON.stringify(
+            (
+              gzipSync(readFileSync(new URL("./dist/index.js", import.meta.url))).byteLength / 1000
+            ).toFixed(1),
+          ),
+        },
         build: { outDir: "../site-dist", emptyOutDir: true, target: "es2022" },
         server: { host: "127.0.0.1" },
         preview: { host: "127.0.0.1" },

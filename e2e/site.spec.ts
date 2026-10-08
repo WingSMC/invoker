@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 
 async function run(page: Page) {
   await page.getByRole("button", { name: "Run demo", exact: true }).click();
@@ -18,6 +20,10 @@ test("runs real weather middleware, renders highlighted code, and has no page er
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Your AI thinks.");
+  const size = (
+    gzipSync(readFileSync(new URL("../dist/index.js", import.meta.url))).byteLength / 1000
+  ).toFixed(1);
+  await expect(page.getByTestId("build-size")).toContainText(`${size} KB`);
   await run(page);
   await expect(page.getByTestId("answer")).toContainText("Berlin, DE: 18°C");
   await expect(page.getByTestId("tool-output")).toContainText('"temperature": 18');
@@ -89,3 +95,27 @@ test("serves from a GitHub Pages repository subpath", async ({ page }) => {
   await run(page);
   await expect(page.getByTestId("answer")).toContainText("18°C");
 });
+
+for (const protocol of ["gemini", "claude"] as const) {
+  test(`${protocol} routes calls and documents provider results`, async ({ page }) => {
+    await page.getByLabel("Mock AI protocol").selectOption(protocol);
+    await run(page);
+    await expect(page.getByTestId("tool-output")).toContainText('"temperature": 18');
+    await expect(page.getByTestId("events-count")).toHaveText("04");
+    const tabs = page.getByRole("tablist", { name: "Provider examples" });
+    await tabs
+      .getByRole("tab", { name: protocol === "gemini" ? "Gemini" : "Claude", exact: true })
+      .click();
+    await expect(page.locator("#adapter-snippet")).toContainText(`${protocol}Adapter`);
+    await expect(page.locator("#adapter-snippet")).toContainText("adapter.result(outcome)");
+    await expect(page.locator("#adapter-snippet code span").first()).toHaveCSS(
+      "color",
+      "rgb(197, 162, 229)",
+    );
+    await page.keyboard.press("Home");
+    await expect(tabs.getByRole("tab", { name: "OpenAI / Azure", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+}

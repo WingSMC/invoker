@@ -36,6 +36,8 @@ function setup(consume = false) {
   invoker.register({
     name: "double",
     description: "Double a number",
+    sideEffects: "None.",
+    returns: { schema: z.number(), description: "The double function result." },
     args: [argument("value", z.number(), "Number")],
     consume,
     handler,
@@ -68,7 +70,7 @@ describe("stream middleware", () => {
     expect(output).toEqual(entries);
     output.forEach((entry, index) => expect(entry).toBe(entries[index]));
     expect(handler).toHaveBeenCalledExactlyOnceWith(4);
-    expect(results[0]?.content).toBe("8");
+    expect(results[0]?.content).toBe('{"success":true,"result":8}');
   });
 
   it("preserves unknown tools without running them or emitting failures", async () => {
@@ -172,6 +174,8 @@ describe("stream middleware", () => {
     limited.register({
       name: "double",
       description: "D",
+      sideEffects: "None.",
+      returns: { schema: z.number(), description: "The double function result." },
       args: [argument("value", z.number(), "Number")],
       handler,
     });
@@ -194,6 +198,8 @@ describe("stream middleware", () => {
     limited.register({
       name: "double",
       description: "D",
+      sideEffects: "None.",
+      returns: { schema: z.number(), description: "The double function result." },
       args: [argument("value", z.number(), "Number")],
       handler,
     });
@@ -255,6 +261,7 @@ describe("stream middleware", () => {
     invoker.register({
       name: "wait",
       description: "Wait",
+      sideEffects: "None.",
       args: [],
       handler: () => Effect.never.pipe(Effect.ensuring(Effect.sync(finalizer))),
     });

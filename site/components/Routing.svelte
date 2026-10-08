@@ -84,32 +84,28 @@
     >
     <g class="motion-reduce:hidden">
       {#each [{ path: 'input-route', begin: '0s', duration: '2s', color: '#c9b4ff' }, { path: 'weather-route', begin: '1.7s', duration: '3.5s', color: '#bca9ee' }, { path: 'docs-route', begin: '3s', duration: '3s', color: '#c0addd' }, { path: 'tool-route', begin: '4.6s', duration: '3.5s', color: '#a4c6b5' }, { path: 'text-route', begin: '1s', duration: '5s', color: '#7b7489' }] as packet}
-        <circle
-          r="6"
-          fill={packet.color}
-          filter="url(#glow)"
-          opacity=".6"
-          ><animateMotion
+        <g visibility="hidden">
+          <set
+            attributeName="visibility"
+            to="visible"
+            begin={packet.begin}
+          />
+          <animateMotion
             dur={packet.duration}
             begin={packet.begin}
             repeatCount="indefinite"
             ><mpath
               href={`#${packet.path}`}
             /></animateMotion
-          ></circle
-        >
-        <circle
-          r="2"
-          fill={packet.color}
-          ><animateMotion
-            dur={packet.duration}
-            begin={packet.begin}
-            repeatCount="indefinite"
-            ><mpath
-              href={`#${packet.path}`}
-            /></animateMotion
-          ></circle
-        >
+          >
+          <circle
+            r="6"
+            fill={packet.color}
+            filter="url(#glow)"
+            opacity=".6"
+          />
+          <circle r="2" fill={packet.color} />
+        </g>
       {/each}
     </g>
     <rect

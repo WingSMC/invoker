@@ -15,7 +15,7 @@ function setup() {
 }
 
 describe("shared demo model", () => {
-  it.each(["chat-completions", "responses"] as const)(
+  it.each(["chat-completions", "responses", "gemini", "claude"] as const)(
     "renders actual successful tool results in %s",
     async (protocol) => {
       const { session, events } = setup();

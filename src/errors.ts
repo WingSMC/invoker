@@ -4,6 +4,7 @@ export type ToolErrorCode =
   | "INVALID_JSON"
   | "INVALID_ARGUMENTS"
   | "HANDLER_FAILED"
+  | "INVALID_RESULT"
   | "SERIALIZATION_FAILED"
   | "INCOMPLETE_CALL"
   | "ARGUMENT_LIMIT"
@@ -25,5 +26,5 @@ export class ToolError extends Error {
 }
 
 export function failureContent(error: ToolError): string {
-  return JSON.stringify({ error: { code: error.code, message: error.message } });
+  return JSON.stringify({ success: false, error: { code: error.code, message: error.message } });
 }

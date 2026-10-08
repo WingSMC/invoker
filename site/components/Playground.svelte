@@ -9,9 +9,9 @@
   import { DemoSession } from '../demo.js';
   import Icon from './Icon.svelte';
 
-  let city = $state('Berlin, DE');
+  const city = 'Berlin, DE';
   let protocol = $state<
-    'chat-completions' | 'responses'
+    'chat-completions' | 'responses' | 'gemini' | 'claude'
   >('chat-completions');
   let registered = $state(true);
   let consume = $state(false);
@@ -190,9 +190,17 @@
         finish_reason?: string | null;
       }[];
       usage?: unknown;
+      candidates?: { finishReason?: string; content?: { parts?: { functionCall?: unknown }[] } }[];
+      usageMetadata?: unknown;
     };
     return (
       event.type ??
+      (event.candidates
+        ? (event.candidates[0]?.finishReason ??
+          (event.candidates[0]?.content?.parts?.some(part => part.functionCall)
+            ? 'functionCall'
+            : event.usageMetadata ? 'usage' : 'content.parts'))
+        : undefined) ??
       (event.usage
         ? 'usage'
         : (event.choices?.[0]?.finish_reason ??
@@ -206,7 +214,7 @@
     event: SubmitEvent,
   ): Promise<void> {
     event.preventDefault();
-    if (running || !city.trim()) return;
+    if (running) return;
     controller = new AbortController();
     const signal = controller.signal;
     running = true;
@@ -220,11 +228,11 @@
     outputs = [];
     answer = '';
     bypassed = false;
-    prompt = `${scenarios.find(item => item.id === scenario)?.prompt} ${city.trim()}?`;
+    prompt = `${scenarios.find(item => item.id === scenario)?.prompt} ${city}?`;
     try {
       const summary = await session.run({
         scenario,
-        city: city.trim(),
+        city,
         protocol,
         signal,
       });
@@ -321,6 +329,8 @@
           >Chat Completions</option
         ><option value="responses"
           >Responses API</option
+        ><option value="gemini">Gemini</option
+        ><option value="claude">Claude</option
         ></select
       ></label
     >
@@ -427,8 +437,8 @@
                 >Assistant</span
               ><p
                 class="text-body leading-7 text-chat-answer"
-                >I can check the weather. Send a
-                request to see how invoker turns a
+                >I can check the weather. Run a
+                scenario to see how invoker turns a
                 tool call into a result.</p
               ></div
             ></div
@@ -455,11 +465,8 @@
           >City for the weather tool</label
         ><input
           id="city"
-          bind:value={city}
-          disabled={running}
-          maxlength="80"
-          required
-          placeholder="Enter a city…"
+          value={city}
+          readonly
           autocomplete="off"
           class="min-w-0 grow bg-transparent px-3 py-2 text-sm text-input-text outline-none"
         /><button

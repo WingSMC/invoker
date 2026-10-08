@@ -23,6 +23,8 @@ describe("adapter boundaries", () => {
     invoker.register({
       name: "echo",
       description: "Echo",
+      sideEffects: "None.",
+      returns: { schema: z.string(), description: "The echo function result." },
       args: [argument("text", z.string(), "Text")],
       handler: (text) => text,
     });
@@ -92,7 +94,14 @@ describe("adapter boundaries", () => {
 
   it("reports incomplete Responses and accepts complete standalone done entries", async () => {
     const invoker = new Invoker();
-    invoker.register({ name: "echo", description: "Echo", args: [], handler: () => "ok" });
+    invoker.register({
+      name: "echo",
+      description: "Echo",
+      sideEffects: "None.",
+      returns: { schema: z.string(), description: "The echo function result." },
+      args: [],
+      handler: () => "ok",
+    });
     const fail = vi.fn();
     const success = vi.fn();
     invoker.onToolCallFail(fail);

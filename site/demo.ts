@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import { z } from "zod";
-import { Invoker, argument } from "../src/index.js";
+import { Invoker, argument, geminiAdapter, claudeAdapter, openAIAdapter } from "../src/index.js";
 import type { ToolFailure, ToolResult } from "../src/index.js";
 import { MockAIService } from "../testing/mock-ai.js";
-import type { MockCall, MockEvent } from "../testing/mock-ai.js";
+import type { MockCall, MockEvent, MockProtocol } from "../testing/mock-ai.js";
 
 export type Scenario = "weather" | "invalid" | "unknown" | "failure" | "parallel" | "truncated";
 export type Stage = "idle" | "stream" | "validate" | "execute" | "success" | "fail" | "bypass";
@@ -16,7 +16,7 @@ export interface DemoUpdate {
 export interface DemoRun {
   readonly scenario: Scenario;
   readonly city: string;
-  readonly protocol: "chat-completions" | "responses";
+  readonly protocol: MockProtocol;
   readonly signal?: AbortSignal;
 }
 export interface DemoSummary {
@@ -58,7 +58,11 @@ export class DemoSession {
     this.invoker.onToolCallSuccess((result) => {
       this.#update({ type: "stage", label: "Tool completed", stage: "success" });
       this.#update({ type: "event", label: "onToolCallSuccess", data: result.value });
-      this.#update({ type: "result", label: result.call.name, data: result.value });
+      this.#update({
+        type: "result",
+        label: result.call.name,
+        data: JSON.parse(result.content) as unknown,
+      });
     });
     this.invoker.onToolCallFail((failure) => {
       this.#update({ type: "stage", label: "Failure contained", stage: "fail" });
@@ -92,6 +96,16 @@ export class DemoSession {
     this.invoker.register({
       name: "get_weather",
       description: "Get the current weather for a city.",
+      sideEffects: "Simulates a weather lookup locally. No network requests or writes.",
+      returns: {
+        schema: z.object({
+          city: z.string(),
+          temperature: z.number(),
+          unit: z.enum(["celsius", "fahrenheit"]),
+          conditions: z.string(),
+        }),
+        description: "Current temperature in the requested unit, city, and sky conditions.",
+      },
       args: [
         argument(
           "city",
@@ -171,7 +185,16 @@ export class DemoSession {
     }
     try {
       this.#update({ type: "stage", label: "Receiving AI stream", stage: "stream" });
-      for await (const chunk of this.invoker.middleware(traced(), signal ? { signal } : {})) {
+      const adapter =
+        options.protocol === "gemini"
+          ? geminiAdapter()
+          : options.protocol === "claude"
+            ? claudeAdapter()
+            : openAIAdapter();
+      for await (const chunk of this.invoker.middleware(traced(), {
+        adapter,
+        ...(signal ? { signal } : {}),
+      })) {
         forwarded++;
         this.#update({ type: "chunk", label: "forwarded", data: chunk });
       }
@@ -217,9 +240,18 @@ export class DemoSession {
 }
 
 export function textDelta(event: MockEvent): string {
+  if ("candidates" in event)
+    return event.candidates
+      .flatMap((candidate) => candidate.content.parts)
+      .map((part) => ("text" in part ? part.text : ""))
+      .join("");
   return "choices" in event
     ? (event.choices[0]?.delta.content ?? "")
     : event.type === "response.output_text.delta"
-      ? event.delta
-      : "";
+      ? typeof event.delta === "string"
+        ? event.delta
+        : ""
+      : event.type === "content_block_delta" && "delta" in event && typeof event.delta === "object"
+        ? (event.delta?.text ?? "")
+        : "";
 }

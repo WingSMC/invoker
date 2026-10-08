@@ -4,6 +4,7 @@
   import Icon from './components/Icon.svelte';
   import Playground from './components/Playground.svelte';
   import Routing from './components/Routing.svelte';
+  import Adapters from './components/Adapters.svelte';
   const github =
     'https://github.com/WingSMC/invoker';
   let toast = $state('');
@@ -135,10 +136,12 @@
       ><span class="hidden sm:inline"
         >Small by design.</span
       ><span
+        data-testid="build-size"
+        title="Gzipped dist/index.js from the library build; external peers, declarations, and source maps excluded."
         ><strong
           class="mr-2 font-mono font-normal text-stat-value"
-          >~4.9 KB</strong
-        >gzip core*</span
+          >{import.meta.env.VITE_INVOKER_GZIP_KB} KB</strong
+        >gzip library*</span
       ><span
         ><strong
           class="mr-2 font-mono font-normal text-stat-value"
@@ -169,12 +172,6 @@
             >A simulated AI. Real middleware.
             Every step, visible.</p
           ></div
-        ><span
-          class="flex w-fit items-center gap-2 rounded border border-sage/10 bg-sage/2 px-3 py-2 font-mono text-meta text-status"
-          ><span
-            class="size-1 rounded-full bg-sage"
-          ></span>Runs in your browser · no API
-          key</span
         ></div
       ><Playground /><p
         class="mt-5 text-center text-label leading-5 text-demo-note"
@@ -209,6 +206,7 @@
         ></div
       ><CodePanel oncopy={copy} /></section
     >
+    <Adapters oncopy={copy} />
     <section
       class="mt-16 grid gap-8 border-t border-white/6 pt-9 md:grid-cols-3 md:gap-12"
       >{#each [{ icon: '◇', title: 'Typed from the start.', text: 'Zod schemas become function arguments. Effect keeps failures and service requirements in the type system.' }, { icon: '≋', title: 'A stream stays a stream.', text: 'Text, metadata, and unknown calls flow through. Consume registered tool entries only when you choose.' }, { icon: '⌘', title: 'Your tools. Your control.', text: 'Register and unregister at runtime. Pause the middleware. Observe every call without coupling it to your UI.' }] as feature}<article

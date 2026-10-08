@@ -10,6 +10,8 @@ export async function chat(client: OpenAI, model: string): Promise<void> {
   invoker.register({
     name: "add",
     description: "Add two numbers.",
+    sideEffects: "None.",
+    returns: { schema: z.number(), description: "The add function result." },
     args: [
       argument("left", z.number(), "Left operand."),
       argument("right", z.number(), "Right operand."),

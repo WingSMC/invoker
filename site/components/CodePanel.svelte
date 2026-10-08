@@ -20,7 +20,7 @@
     register: {
       index: '01',
       title: 'Your function,\nnow a tool.',
-      text: 'Name it. Document it. Define its arguments with Zod. Your handler gets the right types, in the right order.',
+      text: 'Document arguments, results, and side effects. Zod validates inputs; results are trusted by default. Opt into result validation with returns.validate: true.',
       file: 'tools.ts',
       label: 'Register',
     },

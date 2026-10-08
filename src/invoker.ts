@@ -2,21 +2,26 @@ import { Cause, Effect, Exit } from "effect";
 import { z } from "zod";
 import { ToolError, failureContent } from "./errors.js";
 import { Events } from "./events.js";
-import { openAIAdapter } from "./openai.js";
+import { openAIAdapter } from "./adapters/openai.js";
 import type {
   Argument,
+  ArgumentValues,
   ChatTool,
   EffectRunner,
   FunctionSchema,
   InvokerOptions,
+  HandlerRequirements,
   Listener,
   MiddlewareOptions,
   ResponseTool,
+  ProviderAdapter,
   StreamAdapter,
   ToolCall,
   ToolDefinition,
   ToolEvents,
   ToolResult,
+  ToolRegistration,
+  ToolFailure,
 } from "./types.js";
 
 interface Registered {
@@ -25,13 +30,17 @@ interface Registered {
   readonly schema: FunctionSchema;
   readonly consume: boolean;
   readonly handler: (...args: unknown[]) => unknown;
+  readonly resultValidator?: z.ZodType;
+  readonly voidResult: boolean;
+  events?: Events;
 }
 
 function serialize(value: unknown): string {
-  if (typeof value === "string") return value;
-  const result = JSON.stringify(value === undefined ? null : value);
+  // Serialize the payload separately so unsupported values cannot silently disappear.
+  if (value === undefined) return '{"success":true}';
+  const result = JSON.stringify(value);
   if (result === undefined) throw new TypeError("Tool result is not JSON serializable");
-  return result;
+  return `{"success":true,"result":${result}}`;
 }
 
 /** One mutable registry; each middleware iterator owns its stream state. */
@@ -48,7 +57,7 @@ export class Invoker<Requirements = never> {
       : [options: InvokerOptions<Requirements> & { runEffect: EffectRunner<Requirements> }]
   ) {
     this.#paused = options.paused ?? false;
-    this.#adapter = openAIAdapter(options);
+    this.#adapter = options.adapter ?? openAIAdapter(options);
     this.#run =
       options.runEffect ??
       (((effect, signal) =>
@@ -77,16 +86,44 @@ export class Invoker<Requirements = never> {
     return this.#tools.delete(name);
   }
 
-  /** Validates documentation once and caches the input JSON schema. */
-  register<const Args extends readonly Argument[], Output, Error>(
-    definition: ToolDefinition<Args, Output, Error, Requirements>,
-  ): () => void {
+  /** Validates documentation once and caches input and output schema context. */
+  register<
+    const Args extends readonly Argument[],
+    Schema extends z.ZodType = z.ZodVoid,
+    Error = unknown,
+    Validate extends boolean = false,
+    Handler extends (...args: ArgumentValues<Args>) => unknown = (
+      ...args: ArgumentValues<Args>
+    ) => unknown,
+  >(
+    definition: ToolDefinition<Args, Schema, Error, Requirements, Validate> & {
+      readonly handler: Handler;
+    } & {
+      readonly handler: [HandlerRequirements<ReturnType<Handler>>] extends [Requirements]
+        ? Handler
+        : never;
+    },
+  ): ToolRegistration<z.output<Schema>, Requirements> {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(definition.name)) {
       throw new TypeError("Tool names must contain 1–64 letters, digits, underscores, or hyphens");
     }
     if (this.has(definition.name))
       throw new TypeError(`Tool already registered: ${definition.name}`);
     if (!definition.description.trim()) throw new TypeError("Tool documentation cannot be empty");
+    if (!definition.sideEffects?.trim())
+      throw new TypeError("Side effect documentation cannot be empty");
+    if (definition.returns && !definition.returns.description.trim())
+      throw new TypeError("Result documentation cannot be empty");
+    const resultValidator = definition.returns?.schema ?? z.void();
+    const outputSchema =
+      resultValidator instanceof z.ZodVoid
+        ? undefined
+        : z.toJSONSchema(resultValidator, { io: "output", target: "draft-7" });
+    const resultContext =
+      definition.returns && !(resultValidator instanceof z.ZodVoid)
+        ? `Result: ${definition.returns.description}\nResult JSON schema: ${JSON.stringify(outputSchema)}`
+        : `Result: ${definition.returns ? `${definition.returns.description} ` : ""}No value is returned.`;
+    const description = `${definition.description}\n\nSide effects: ${definition.sideEffects}\n\n${resultContext}\nSuccess response: JSON with success: true and result containing the declared value, when present. Void success is {"success":true}. Failure response: JSON with success: false and error containing code and message. A failure does not guarantee side effects were rolled back.`;
     const shape: Record<string, z.ZodType> = Object.create(null);
     const args = definition.args.map((arg) => ({ ...arg }));
     for (const arg of args) {
@@ -100,34 +137,81 @@ export class Invoker<Requirements = never> {
     const registered: Registered = {
       args,
       validator,
+      ...(definition.returns?.validate ? { resultValidator } : {}),
+      voidResult: !definition.returns || resultValidator instanceof z.ZodVoid,
       handler: definition.handler as Registered["handler"],
       consume: definition.consume ?? false,
       schema: {
         name: definition.name,
-        description: definition.description,
+        description,
         parameters,
         strict: false,
+        resultSchema: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                success: { const: true },
+                ...(outputSchema ? { result: outputSchema } : {}),
+              },
+              required: outputSchema ? ["success", "result"] : ["success"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                success: { const: false },
+                error: {
+                  type: "object",
+                  properties: { code: { type: "string" }, message: { type: "string" } },
+                  required: ["code", "message"],
+                },
+              },
+              required: ["success", "error"],
+            },
+          ],
+        },
       },
     };
     this.#tools.set(definition.name, registered);
-    return () => {
-      if (this.#tools.get(definition.name) === registered) this.unregister(definition.name);
+    const name = definition.name;
+    const events = () => {
+      if (!registered.events) {
+        registered.events = new Events();
+        registered.events.on("onListenerError", (event) =>
+          this.#events.emit("onListenerError", event),
+        );
+      }
+      return registered.events;
     };
+    const unregister = () => {
+      if (this.#tools.get(name) === registered) this.unregister(name);
+    };
+    return Object.assign(unregister, {
+      invoke: (call: Omit<ToolCall, "name">) =>
+        Effect.suspend(() =>
+          this.#tools.get(name) === registered
+            ? this.invoke({ ...call, name })
+            : Effect.fail(
+                new ToolError("NOT_REGISTERED", "This tool registration is no longer active"),
+              ),
+        ) as Effect.Effect<ToolResult<z.output<Schema>>, ToolError, Requirements>,
+      onToolCallSuccess: (listener: Listener<ToolResult<z.output<Schema>>>) =>
+        events().on("onToolCallSuccess", listener as Listener<ToolResult>),
+      onAfterToolCall: (listener: Listener<ToolResult<z.output<Schema>> | ToolFailure>) =>
+        events().on("onAfterToolCall", listener as Listener<ToolEvents["onAfterToolCall"]>),
+    });
   }
 
   /** OpenAI/Azure Chat Completions tools; snapshots cannot mutate the registry. */
-  toTools(): ChatTool[] {
-    return [...this.#tools.values()].map(({ schema }) => ({
-      type: "function",
-      function: structuredClone(schema),
-    }));
+  toTools(): ChatTool[];
+  toTools<Tools>(adapter: ProviderAdapter<Tools, unknown>): Tools;
+  toTools(adapter: ProviderAdapter<unknown, unknown> = openAIAdapter()): unknown {
+    return adapter.tools([...this.#tools.values()].map(({ schema }) => structuredClone(schema)));
   }
 
   toResponseTools(): ResponseTool[] {
-    return [...this.#tools.values()].map(({ schema }) => ({
-      type: "function",
-      ...structuredClone(schema),
-    }));
+    return this.toTools(openAIAdapter({ protocol: "responses" }));
   }
 
   on<Key extends keyof ToolEvents>(event: Key, listener: Listener<ToolEvents[Key]>): () => void {
@@ -180,7 +264,7 @@ export class Invoker<Requirements = never> {
           try: () => tool.handler(...tool.args.map((arg) => args[arg.name])),
           catch: (error) => new ToolError("HANDLER_FAILED", "Tool handler threw an error", error),
         });
-        const value = Effect.isEffect(output)
+        const resolved = Effect.isEffect(output)
           ? yield* (output as Effect.Effect<unknown, unknown, Requirements>).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
@@ -194,6 +278,15 @@ export class Invoker<Requirements = never> {
               try: () => Promise.resolve(output),
               catch: (error) => new ToolError("HANDLER_FAILED", "Tool promise rejected", error),
             });
+        const value = tool.resultValidator
+          ? yield* Effect.tryPromise({
+              try: () => tool.resultValidator!.parseAsync(resolved),
+              catch: (error) =>
+                new ToolError("INVALID_RESULT", "Tool result failed validation", error),
+            })
+          : tool.voidResult
+            ? undefined
+            : resolved;
         const content = yield* Effect.try({
           try: () => serialize(value),
           catch: (error) =>
@@ -216,7 +309,9 @@ export class Invoker<Requirements = never> {
           Effect.sync(() => {
             if (Exit.isSuccess(exit)) {
               this.#events.emit("onToolCallSuccess", exit.value);
+              tool?.events?.emit("onToolCallSuccess", exit.value);
               this.#events.emit("onAfterToolCall", exit.value);
+              tool?.events?.emit("onAfterToolCall", exit.value);
             } else {
               const squashed = Cause.squash(exit.cause);
               const error = Cause.hasInterruptsOnly(exit.cause)
@@ -227,6 +322,7 @@ export class Invoker<Requirements = never> {
               const failure = { call, error, content: failureContent(error) };
               this.#events.emit("onToolCallFail", failure);
               this.#events.emit("onAfterToolCall", failure);
+              tool?.events?.emit("onAfterToolCall", failure);
             }
           }),
         ),

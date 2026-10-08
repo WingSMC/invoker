@@ -1,5 +1,12 @@
-import { ToolError } from "./errors.js";
-import type { StreamAdapter, StreamSession, ToolCall } from "./types.js";
+import { ToolError } from "../errors.js";
+import type {
+  AdapterOptions,
+  ChatTool,
+  ProviderAdapter,
+  ResponseTool,
+  StreamSession,
+  ToolCall,
+} from "../types.js";
 
 interface Pending {
   id: string;
@@ -14,11 +21,20 @@ interface Pending {
   error?: ToolError;
 }
 
-export interface OpenAIAdapterOptions {
-  /** Maximum UTF-16 code units buffered per call. Default: 1 MiB. */
-  readonly maxArgumentLength?: number;
-  /** Maximum in-flight calls in one stream. Default: 128. */
-  readonly maxPendingCalls?: number;
+export interface OpenAIAdapterOptions extends AdapterOptions {
+  /** Declaration/result format. Streaming accepts both protocols. Default: Chat Completions. */
+  readonly protocol?: "chat-completions" | "responses";
+}
+
+export interface OpenAIChatResult {
+  readonly role: "tool";
+  readonly tool_call_id: string;
+  readonly content: string;
+}
+export interface OpenAIResponseResult {
+  readonly type: "function_call_output";
+  readonly call_id: string;
+  readonly output: string;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -39,11 +55,37 @@ function limit(value: number | undefined, fallback: number, name: string): numbe
 }
 
 /** OpenAI/Azure Chat Completions and OpenAI Responses; no SDK runtime dependency. */
-export function openAIAdapter(options: OpenAIAdapterOptions = {}): StreamAdapter {
+export function openAIAdapter(
+  options: OpenAIAdapterOptions & { protocol: "responses" },
+): ProviderAdapter<ResponseTool[], OpenAIResponseResult>;
+export function openAIAdapter(
+  options?: OpenAIAdapterOptions & { protocol?: "chat-completions" },
+): ProviderAdapter<ChatTool[], OpenAIChatResult>;
+export function openAIAdapter(
+  options: OpenAIAdapterOptions,
+): ProviderAdapter<ChatTool[] | ResponseTool[], OpenAIChatResult | OpenAIResponseResult>;
+export function openAIAdapter(
+  options: OpenAIAdapterOptions = {},
+): ProviderAdapter<ChatTool[] | ResponseTool[], OpenAIChatResult | OpenAIResponseResult> {
   const maxLength = limit(options.maxArgumentLength, 1_048_576, "maxArgumentLength");
   const maxCalls = limit(options.maxPendingCalls, 128, "maxPendingCalls");
 
   return {
+    tools: (schemas) => {
+      const functions = schemas.map(({ name, description, parameters, strict }) => ({
+        name,
+        description,
+        parameters: structuredClone(parameters),
+        strict,
+      }));
+      return options.protocol === "responses"
+        ? functions.map((schema) => ({ type: "function" as const, ...schema }))
+        : functions.map((schema) => ({ type: "function" as const, function: schema }));
+    },
+    result: (outcome) =>
+      options.protocol === "responses"
+        ? { type: "function_call_output", call_id: outcome.call.id, output: outcome.content }
+        : { role: "tool", tool_call_id: outcome.call.id, content: outcome.content },
     create(): StreamSession {
       const pending = new Map<string, Pending>();
       let exhausted = false;

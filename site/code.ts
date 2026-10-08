@@ -39,6 +39,17 @@ const invoker = new Invoker();
 invoker.register({
   name: "get_weather",
   description: "Get the weather for a city.",
+  sideEffects: "Reads weather data. No writes.",
+  returns: {
+    schema: z.object({
+      city: z.string(),
+      unit: z.enum(["celsius", "fahrenheit"]),
+      temperature: z.number(),
+    }),
+    description: "Temperature in the requested unit.",
+    // Schema documents/types the result. No parsing by default.
+    // Set validate: true for refinements or transforms.
+  },
   args: [
     argument("city", z.string(), "City and country."),
     argument("unit", z.enum(["celsius", "fahrenheit"])
@@ -104,7 +115,7 @@ const mock = new MockAIService({
 });
 
 const stream = mock.stream({
-  protocol: "chat-completions", // Or "responses".
+  protocol: "chat-completions", // responses, gemini, claude too.
   text: "Let me check the weather.",
   calls: [{
     name: "get_weather",
@@ -118,4 +129,79 @@ for await (const chunk of invoker.middleware(stream)) {
 
 // Test failures too: invalid JSON, truncate, failAfter,
 // interleaved calls, unknown tools, and AbortSignal.`,
+} as const;
+
+export const providerSnippets = {
+  openai: `import { openAIAdapter } from "invoker";
+
+// Use your registered invoker and SDK client.
+const adapter = openAIAdapter(); // Azure uses this too.
+const results = [];
+const off = invoker.onAfterToolCall(outcome => {
+  results.push(adapter.result(outcome));
+});
+
+const stream = await client.chat.completions.create({
+  model, messages, stream: true,
+  tools: invoker.toTools(adapter),
+});
+for await (const chunk of invoker.middleware(stream, { adapter })) {
+  renderChat(chunk); // Preserve the complete assistant message.
+}
+off();
+
+// Append that assistant message, then these tool messages.
+messages.push(assistantMessage, ...results);
+// Make the next request with the updated history.
+
+// Responses: openAIAdapter({ protocol: "responses" })
+// exports response tools + function_call_output results.`,
+  gemini: `import { geminiAdapter } from "invoker";
+
+const adapter = geminiAdapter();
+const results = [];
+const parts = [];
+const off = invoker.onAfterToolCall(outcome => {
+  results.push(adapter.result(outcome));
+});
+
+const stream = await ai.models.generateContentStream({
+  model, contents,
+  config: { tools: invoker.toTools(adapter), candidateCount: 1 },
+});
+for await (const chunk of invoker.middleware(stream, { adapter })) {
+  // Keep all parts, including thoughtSignature and functionCall.
+  parts.push(...(chunk.candidates?.[0]?.content?.parts ?? []));
+  renderGemini(chunk);
+}
+off();
+
+contents.push(
+  { role: "model", parts },
+  { role: "user", parts: results }, // functionResponse parts
+);
+// Make the next request with the updated contents.`,
+  claude: `import { claudeAdapter } from "invoker";
+
+const adapter = claudeAdapter();
+const results = [];
+const off = invoker.onAfterToolCall(outcome => {
+  results.push(adapter.result(outcome));
+});
+
+const stream = client.messages.stream({
+  model, messages, max_tokens: 1024,
+  tools: invoker.toTools(adapter),
+});
+for await (const event of invoker.middleware(stream, { adapter })) {
+  renderClaude(event); // Text, thinking, and server tools pass through.
+}
+off();
+const assistant = await stream.finalMessage();
+
+messages.push(
+  { role: "assistant", content: assistant.content },
+  { role: "user", content: results }, // tool_result blocks
+);
+// Make the next request with the updated messages.`,
 } as const;

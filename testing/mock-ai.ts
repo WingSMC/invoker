@@ -6,8 +6,9 @@ export interface MockCall {
   readonly id?: string;
 }
 
+export type MockProtocol = "chat-completions" | "responses" | "gemini" | "claude";
 export interface MockRequest {
-  readonly protocol?: "chat-completions" | "responses";
+  readonly protocol?: MockProtocol;
   readonly text?: string;
   readonly calls?: readonly MockCall[];
   readonly delayMs?: number;
@@ -101,7 +102,46 @@ export type MockResponseEvent =
       };
     };
 
-export type MockEvent = MockChatChunk | MockResponseEvent;
+export interface MockGeminiChunk {
+  readonly candidates: readonly {
+    readonly index: number;
+    readonly content: {
+      readonly role: "model";
+      readonly parts: readonly (
+        | { readonly text: string }
+        | {
+            readonly functionCall: {
+              readonly id: string;
+              readonly name: string;
+              readonly args: unknown;
+            };
+          }
+      )[];
+    };
+    readonly finishReason?: "STOP";
+  }[];
+  readonly usageMetadata?: { readonly totalTokenCount: number };
+}
+export interface MockClaudeEvent {
+  readonly type: string;
+  readonly index?: number;
+  readonly content_block?:
+    | { readonly type: "text"; readonly text: string }
+    | {
+        readonly type: "tool_use";
+        readonly id: string;
+        readonly name: string;
+        readonly input: Record<string, unknown>;
+      };
+  readonly delta?: {
+    readonly type?: "input_json_delta" | "text_delta";
+    readonly partial_json?: string;
+    readonly text?: string;
+    readonly stop_reason?: "tool_use" | "end_turn";
+  };
+  readonly usage?: { readonly output_tokens: number };
+}
+export type MockEvent = MockChatChunk | MockResponseEvent | MockGeminiChunk | MockClaudeEvent;
 
 function positive(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 1)
@@ -148,6 +188,8 @@ export class MockAIService {
   }
 
   stream(request: MockRequest & { protocol: "responses" }): AsyncGenerator<MockResponseEvent>;
+  stream(request: MockRequest & { protocol: "gemini" }): AsyncGenerator<MockGeminiChunk>;
+  stream(request: MockRequest & { protocol: "claude" }): AsyncGenerator<MockClaudeEvent>;
   stream(request: MockRequest & { protocol?: "chat-completions" }): AsyncGenerator<MockChatChunk>;
   stream(request: MockRequest): AsyncGenerator<MockEvent>;
   async *stream(request: MockRequest): AsyncGenerator<MockEvent> {
@@ -164,9 +206,13 @@ export class MockAIService {
       json: typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments),
     }));
     const events =
-      request.protocol === "responses"
-        ? this.#responses(id, request.text ?? "", calls, size, request.truncate ?? false)
-        : this.#chat(id, request.text ?? "", calls, size, request.truncate ?? false);
+      request.protocol === "gemini"
+        ? this.#gemini(request.text ?? "", calls, size, request.truncate ?? false)
+        : request.protocol === "claude"
+          ? this.#claude(request.text ?? "", calls, size, request.truncate ?? false)
+          : request.protocol === "responses"
+            ? this.#responses(id, request.text ?? "", calls, size, request.truncate ?? false)
+            : this.#chat(id, request.text ?? "", calls, size, request.truncate ?? false);
     let count = 0;
     for (const event of events) {
       request.signal?.throwIfAborted();
@@ -175,6 +221,90 @@ export class MockAIService {
       request.signal?.throwIfAborted();
       count++;
       yield event;
+    }
+  }
+
+  *#gemini(
+    text: string,
+    calls: readonly PreparedCall[],
+    size: number,
+    truncate: boolean,
+  ): Generator<MockGeminiChunk> {
+    for (const delta of fragments(text, Math.max(size, 16)))
+      yield { candidates: [{ index: 0, content: { role: "model", parts: [{ text: delta }] } }] };
+    if (calls.length)
+      yield {
+        candidates: [
+          {
+            index: 0,
+            content: {
+              role: "model",
+              parts: calls.map((call) => ({
+                functionCall: {
+                  id: call.id,
+                  name: call.name,
+                  args: (() => {
+                    try {
+                      return JSON.parse(call.json) as unknown;
+                    } catch {
+                      return call.json;
+                    }
+                  })(),
+                },
+              })),
+            },
+          },
+        ],
+      };
+    if (!truncate)
+      yield {
+        candidates: [{ index: 0, content: { role: "model", parts: [] }, finishReason: "STOP" }],
+        usageMetadata: { totalTokenCount: 72 },
+      };
+  }
+
+  *#claude(
+    text: string,
+    calls: readonly PreparedCall[],
+    size: number,
+    truncate: boolean,
+  ): Generator<MockClaudeEvent> {
+    yield { type: "message_start" };
+    yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+    for (const delta of fragments(text, Math.max(size, 16)))
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: delta } };
+    yield { type: "content_block_stop", index: 0 };
+    for (const [index, call] of calls.entries())
+      yield {
+        type: "content_block_start",
+        index: index + 1,
+        content_block: { type: "tool_use", id: call.id, name: call.name, input: {} },
+      };
+    const queues = calls.map((call) => fragments(call.json, size));
+    let more = true;
+    while (more) {
+      more = false;
+      for (const [index, queue] of queues.entries()) {
+        const next = queue.next();
+        if (!next.done) {
+          more = true;
+          yield {
+            type: "content_block_delta",
+            index: index + 1,
+            delta: { type: "input_json_delta", partial_json: next.value },
+          };
+        }
+      }
+    }
+    if (!truncate) {
+      for (let index = 0; index < calls.length; index++)
+        yield { type: "content_block_stop", index: index + 1 };
+      yield {
+        type: "message_delta",
+        delta: { stop_reason: calls.length ? "tool_use" : "end_turn" },
+        usage: { output_tokens: 40 },
+      };
+      yield { type: "message_stop" };
     }
   }
 
