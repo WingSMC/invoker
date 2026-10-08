@@ -15,7 +15,7 @@ A small TypeScript npm library that registers documented functions and invokes t
 ## Install
 
 ```sh
-pnpm add invoker effect zod
+pnpm add @wingsmc/invoker effect zod
 ```
 
 Your application must supply Effect (`^4.0.2`) and Zod (`^4.6.5`) as peer dependencies. This repository also uses them for builds and tests.

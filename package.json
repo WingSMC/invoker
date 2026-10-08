@@ -1,5 +1,5 @@
 {
-  "name": "invoker",
+  "name": "@wingsmc/invoker",
   "version": "0.1.0",
   "description": "Minimal, typed AI tool invocation and streaming middleware powered by Effect and Zod.",
   "license": "MIT",

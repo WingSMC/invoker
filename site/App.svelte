@@ -107,12 +107,14 @@
             /></a
           ><button
             onclick={() =>
-              copy('pnpm add invoker effect zod')}
+              copy(
+                'pnpm add @wingsmc/invoker effect zod',
+              )}
             aria-label="Copy install command"
             class="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/1 px-3.5 py-3.5 font-mono text-label text-install hover:border-lilac/35"
             ><span class="text-install-prefix"
               >$</span
-            >pnpm add invoker<span
+            >pnpm add @wingsmc/invoker effect zod<span
               class="ml-2 text-install-icon"
               ><Icon
                 name="copy"
@@ -238,10 +240,12 @@
         class="relative flex flex-wrap items-center justify-center gap-6"
         ><button
           onclick={() =>
-            copy('pnpm add invoker effect zod')}
+            copy(
+              'pnpm add @wingsmc/invoker effect zod',
+            )}
           class="flex items-center gap-3 rounded-lg border border-white/8 bg-white/1 px-4 py-3.5 font-mono text-label text-cta-command hover:border-lilac/35"
           ><span class="text-cta-prefix">$</span
-          >pnpm add invoker effect zod<Icon
+          >pnpm add @wingsmc/invoker effect zod<Icon
             name="copy"
             size={14}
           /></button
