@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+.vite-plus/
+.cache/
+coverage/
+*.tgz
+.package-smoke/
+*.log
+.DS_Store
+!.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
