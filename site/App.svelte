@@ -1,10 +1,11 @@
 ﻿<script lang="ts">
   import { onDestroy } from 'svelte';
+  import Adapters from './components/Adapters.svelte';
   import CodePanel from './components/CodePanel.svelte';
   import Icon from './components/Icon.svelte';
   import Playground from './components/Playground.svelte';
   import Routing from './components/Routing.svelte';
-  import Adapters from './components/Adapters.svelte';
+
   const github =
     'https://github.com/WingSMC/invoker';
   let toast = $state('');

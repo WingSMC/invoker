@@ -1,16 +1,16 @@
-# invoker
+# Invoker
 
 [Live demo and documentation](https://wingsmc.github.io/invoker/)
 
-A small TypeScript npm library for registering documented functions and invoking them from AI chat streams. Zod validates arguments; Effect tracks execution errors and service requirements. Result schemas provide types and model context, with optional runtime validation.
+A small TypeScript npm library that registers documented functions and invokes them from AI chat streams. Zod validates arguments. Effect tracks execution errors and service requirements. Result schemas provide types and model context, with optional runtime validation.
 
-- Positional handler arguments inferred from an ordered list of named Zod validators.
-- Documented result schemas, typed registration handles, and explicit side-effect context for the model.
-- Plain functions, promises, and Effects, including Effects with typed service dependencies.
-- Adapters for OpenAI/Azure Chat Completions, OpenAI Responses, Gemini, and Claude streams.
-- Runtime registration, unregistration, pause/resume, and isolated lifecycle events.
-- Original stream entries preserved by default; opt into consumption per tool.
-- Pull-based iteration, bounded fragment buffers, no SDK runtime dependency, no Node-specific runtime APIs.
+- Infer positional arguments from an ordered list of named Zod validators.
+- Document results and side effects for the model. Invoke tools and observe results through typed registration handles.
+- Use plain functions, promises, or Effects with typed service dependencies.
+- Adapt OpenAI/Azure Chat Completions, OpenAI Responses, Gemini, and Claude streams.
+- Register, unregister, pause, and resume tools at runtime. Observe isolated lifecycle events.
+- Preserve original stream entries by default. Enable consumption per tool to remove its entries.
+- Read streams through pull-based iteration with bounded fragment buffers. The library has no SDK runtime dependency and uses no Node-specific runtime APIs.
 
 ## Install
 
@@ -18,7 +18,9 @@ A small TypeScript npm library for registering documented functions and invoking
 pnpm add invoker effect zod
 ```
 
-Effect (`^4.0.2`) and Zod (`^4.6.5`) are required peer dependencies supplied by your application. They are also development dependencies here for builds and tests. The package is ESM, targets ES2022, and includes TypeScript declarations. Provider SDKs are development dependencies for compatibility checks and examples; choose the SDKs your application needs.
+Your application must supply Effect (`^4.0.2`) and Zod (`^4.6.5`) as peer dependencies. This repository also uses them for builds and tests.
+
+The package uses ESM, targets ES2022, and includes TypeScript declarations. Provider SDKs are development dependencies for compatibility checks and examples. Install only the SDKs your application needs.
 
 ## Register a tool
 
@@ -62,23 +64,49 @@ invoker.pause();
 invoker.resume();
 ```
 
-The model supplies a JSON object with named properties. Arguments are validated together and passed to the handler in the order declared in `args`. Handler types use the schemas' **output** types, so transforms, defaults, and optional values work. Async refinements are supported. Unexpected properties fail validation. Empty `args: []` supports zero-argument functions.
+The model supplies a JSON object with named properties. Invoker validates arguments together, then passes them to the handler in `args` order.
 
-`argument()` is a convenience helper; `{ name, schema, description }` works too. Tool, argument, side-effect, and declared result documentation are required. Use `sideEffects: "None."` for pure functions; explain external reads, writes, notifications, or UI changes otherwise. Registration caches the input and output JSON schemas and rejects duplicate tool names, duplicate argument names, unsupported JSON schemas, and invalid tool names. Names follow OpenAI's 1–64 character letters/digits/underscore/hyphen format.
+- Handler arguments use the schemas' **output** types, including transforms, defaults, and optional values.
+- Validation supports async refinements and rejects unexpected properties.
+- Use `args: []` for zero-argument functions.
 
-Definitions use `strict: false` in provider requests so optional/defaulted Zod input schemas retain their semantics. Local validation always runs. Provider schema support may be narrower than Zod's JSON Schema support; use JSON-representable input schemas for tools.
+Use `argument()` or write `{ name, schema, description }` directly. Document each tool, argument, side effect, and declared result. For pure functions, use `sideEffects: "None."`. Otherwise, describe external reads, writes, notifications, or UI changes.
+
+Registration caches input and output JSON schemas. It rejects:
+
+- Duplicate tool or argument names.
+- Unsupported JSON schemas.
+- Invalid tool names. OpenAI allows 1–64 characters: letters, digits, underscores, and hyphens.
+
+Provider definitions use `strict: false` to preserve optional and defaulted Zod inputs. Local validation always runs. Providers may support fewer JSON Schema features than Zod. Use input schemas that JSON Schema can represent.
 
 ## Results and model context
 
-Declare `returns: { schema, description }` for value-returning handlers. By default, the handler must return the schema's **output** type, and its value is trusted: no result parsing, refinement, cloning, or transformation runs. Typed invocation and per-tool success events expose that output type. JSON serialization still runs to prepare the model response.
+Declare `returns: { schema, description }` for handlers that return values.
 
-Set `returns.validate: true` to opt into async result validation and transformations. In that mode the handler returns the schema's **input** type, and events expose its parsed **output** type. Invalid results fail with `INVALID_RESULT`. Side effects may already have occurred; failure does not imply rollback.
+By default, the handler must return the schema's **output** type. Invoker trusts the value without parsing, refinements, cloning, or transforms. Typed invocation and per-tool success events expose that type. Invoker still serializes the result for the model.
 
-All adapters include `sideEffects`, result documentation, the output JSON schema (including field `.describe()` text), and success/failure semantics in the tool description. Gemini additionally receives the response envelope schema in `responseJsonSchema`.
+Set `returns.validate: true` for async result validation and transforms. The handler then returns the schema's **input** type. Events expose the parsed **output** type. Invalid results fail with `INVALID_RESULT`. Side effects may already have occurred. Failure does not imply rollback.
 
-Omitting `returns` declares a void handler. Successful void actions produce `content: '{"success":true}'`; value-returning tools produce `'{"success":true,"result":...}'`. Failures produce `'{"success":false,"error":{"code":...,"message":...}}'`. `value` stays the handler's original value for your UI unless validation is enabled. Void tools ignore any accidental value; explicitly enable validation with `returns: { schema: z.void(), description: "No value.", validate: true }` to reject it.
+Each adapter includes these details in the tool description:
 
-The callable unregister handle provides typed invocation and per-tool subscriptions:
+- `sideEffects` and result documentation.
+- The output JSON schema, including field `.describe()` text.
+- Success and failure semantics.
+
+Gemini also receives the response envelope schema in `responseJsonSchema`.
+
+Omit `returns` to declare a void handler. Invoker formats `content` as follows:
+
+| Outcome       | `content`                                                |
+| ------------- | -------------------------------------------------------- |
+| Void success  | `'{"success":true}'`                                     |
+| Value success | `'{"success":true,"result":...}'`                        |
+| Failure       | `'{"success":false,"error":{"code":...,"message":...}}'` |
+
+Without validation, `value` retains the handler's original value for your UI. Void tools ignore accidental return values. To reject them, use `returns: { schema: z.void(), description: "No value.", validate: true }`.
+
+The callable unregister handle supports typed invocation and per-tool subscriptions:
 
 ```ts
 unregister.onToolCallSuccess(({ value }) => {
@@ -103,11 +131,13 @@ invoker.register({
 });
 ```
 
-The handle's `onAfterToolCall` receives the typed success or a `ToolFailure`. Handles stay tied to their original registration and cannot invoke or observe replacements under the same name. Global instance results remain `unknown` because unrelated tools share the mutable registry. Send each outcome's `content` back in the next model request; middleware does not issue requests itself.
+The handle's `onAfterToolCall` receives a typed success or `ToolFailure`. Handles belong to their original registration. They cannot invoke or observe replacements with the same name. Global instance results remain `unknown` because unrelated tools share the mutable registry.
+
+Send each outcome's `content` in the next model request. Middleware does not send requests.
 
 ## Provider adapters
 
-The registry and Effect execution are shared; adapters own provider declarations, result messages, and stream assembly. OpenAI/Azure support lives in `src/adapters/openai.ts`, alongside `gemini.ts` and `claude.ts`.
+Adapters share the registry and Effect execution. Each adapter creates provider declarations, formats results, and assembles stream fragments. The implementations are `src/adapters/openai.ts`, `gemini.ts`, and `claude.ts`. The OpenAI adapter also supports Azure.
 
 | Factory                                    | Input stream                    | `invoker.toTools(adapter)` | `adapter.result(outcome)`           |
 | ------------------------------------------ | ------------------------------- | -------------------------- | ----------------------------------- |
@@ -116,7 +146,13 @@ The registry and Effect execution are shared; adapters own provider declarations
 | `geminiAdapter()`                          | GenerateContent chunks          | `functionDeclarations`     | `functionResponse` part             |
 | `claudeAdapter()`                          | Messages raw events             | `input_schema` tools       | `tool_result` block with `is_error` |
 
-Pass the same adapter to tool export and middleware. `new Invoker({ adapter })` sets the instance's default **stream** adapter; declarations are selected explicitly with `toTools(adapter)`. Calling `toTools()` keeps its OpenAI Chat Completions default, and `toResponseTools()` remains a convenience method. Each adapter accepts `maxArgumentLength` and `maxPendingCalls`; configure limits on the adapter when supplying one explicitly.
+Pass the same adapter to tool export and middleware.
+
+- `new Invoker({ adapter })` sets the default **stream** adapter only.
+- `toTools(adapter)` selects the adapter for declarations. Without an argument, `toTools()` defaults to OpenAI Chat Completions.
+- `toResponseTools()` exports OpenAI Responses tools.
+
+Each adapter accepts `maxArgumentLength` and `maxPendingCalls`. When you supply an adapter explicitly, set its limits on that adapter.
 
 ## OpenAI / Azure Chat Completions
 
@@ -151,11 +187,22 @@ off();
 const toolMessages = completed.map(adapter.result);
 ```
 
-Before the next request, append the complete assistant message containing **all** tool calls, followed by the corresponding tool messages. Route unknown tools to their own handlers. The library executes registered tools and exposes their results; your application owns message history, additional requests, and the model/tool loop. Consuming stream fragments requires reconstructing handled assistant tool calls from event `call` values. Multiple chat choices have separate calls; use `call.choiceIndex` to maintain separate conversation branches.
+Before the next request:
 
-Use SDK-decoded async iterables. Raw HTTP/SSE bytes need decoding before middleware. Streamed JSON is parsed once, after `finish_reason: "tool_calls"`. Truncated/content-filtered calls produce `INCOMPLETE_CALL`; they never execute. Text and non-tool deltas are forwarded immediately when pulled. Calls completing in the same chunk run sequentially before that chunk is yielded. A slow tool therefore applies backpressure to subsequent reads.
+1. Append the complete assistant message with **all** tool calls.
+2. Append the corresponding tool messages.
+3. Route unknown calls to their own handlers.
 
-See the [official OpenAI function calling guide](https://developers.openai.com/api/docs/guides/function-calling#streaming) for fragmented deltas and the follow-up request format.
+Invoker executes registered tools and exposes results. Your application manages history, additional requests, and the model/tool loop. If you consume fragments, reconstruct handled assistant calls from event `call` values. For multiple chat choices, use `call.choiceIndex` to keep conversation branches separate.
+
+Use SDK-decoded async iterables. Decode raw HTTP/SSE bytes before passing them to middleware.
+
+- Invoker parses streamed JSON once, after `finish_reason: "tool_calls"`.
+- Truncated or content-filtered calls fail with `INCOMPLETE_CALL` and never execute.
+- Middleware forwards text and non-tool deltas immediately when pulled.
+- Calls completed in one chunk run sequentially before middleware yields that chunk. Slow tools delay subsequent reads through backpressure.
+
+See the [official OpenAI function calling guide](https://developers.openai.com/api/docs/guides/function-calling#streaming) for fragmented deltas and the next request's format.
 
 ## OpenAI Responses
 
@@ -180,7 +227,9 @@ for await (const event of invoker.middleware(responseStream)) {
 offResponses();
 ```
 
-Execution waits for `response.output_item.done`, uses `call_id` for tool results, and does not execute again at `response.completed`. Return `outputs` with the previous response ID, or retain complete output items (including reasoning) in your next input. Azure support covers compatible Chat Completions streams; Responses support depends on the provider/deployment.
+Invoker executes calls at `response.output_item.done`, not again at `response.completed`. Tool results use `call_id`.
+
+Send `outputs` with the previous response ID, or retain complete output items, including reasoning, in the next input. Azure supports compatible Chat Completions streams. Responses support depends on the provider and deployment.
 
 ## Gemini
 
@@ -211,9 +260,11 @@ if (results.length) {
 }
 ```
 
-Complete JSON `functionCall` parts execute after the candidate's `finishReason: "STOP"`. Other finish reasons or missing completion markers fail pending calls with `INCOMPLETE_CALL`. Calls with no provider ID get a local lifecycle ID; their `functionResponse` omits that synthetic ID and retains the function name. Preserve all model parts and signatures. Multiple candidates need separate history branches using `call.choiceIndex`.
+Invoker executes complete JSON `functionCall` parts after the candidate's `finishReason: "STOP"`. Other finish reasons or missing completion markers fail pending calls with `INCOMPLETE_CALL`.
 
-This adapter handles Gemini GenerateContent streams, including parallel complete function calls. Gemini Live events and Vertex `partialArgs`/`willContinue` argument streaming need separate adapters; partial Vertex calls are rejected without executing. See the [typed SDK example](examples/gemini.ts).
+Calls without provider IDs receive local lifecycle IDs. Their `functionResponse` omits the synthetic ID and retains the function name. Preserve all model parts and signatures. For multiple candidates, use `call.choiceIndex` to keep history branches separate.
+
+The adapter supports GenerateContent streams, including parallel complete function calls. Gemini Live events and Vertex `partialArgs`/`willContinue` argument streaming need separate adapters. Invoker rejects partial Vertex calls without executing them. See the [typed SDK example](examples/gemini.ts).
 
 ## Claude
 
@@ -245,17 +296,34 @@ if (results.length) {
 }
 ```
 
-The adapter assembles client `tool_use` blocks by index, joins `input_json_delta` fragments, and dispatches at `content_block_stop`. Message termination before a block closes fails it with `INCOMPLETE_CALL`. Thinking/signature deltas and server tools remain untouched. Result blocks match `tool_use_id` and set `is_error` for failures. Keep the SDK's complete assistant content, including thinking and signatures, before sending results in the next user message. See the [typed SDK example](examples/claude.ts).
+The adapter assembles client `tool_use` blocks by index. It joins `input_json_delta` fragments and dispatches at `content_block_stop`. If the message ends before a block closes, that call fails with `INCOMPLETE_CALL`. The adapter preserves thinking/signature deltas and server tools.
 
-These examples advertise registered tools only and perform one tool round. Applications own round limits and must resolve unknown tool calls if any appear. Collect outcomes synchronously and unsubscribe in `finally` in production code. Keep the full assistant content before middleware filtering if opting into consumption.
+Result blocks match `tool_use_id` and set `is_error` for failures. Preserve the SDK's complete assistant content, including thinking and signatures. Send results in the next user message. See the [typed SDK example](examples/claude.ts).
+
+These examples advertise registered tools only and perform one tool round. Your application sets round limits and must resolve unknown calls if any appear.
+
+In production:
+
+- Collect outcomes synchronously.
+- Unsubscribe in `finally`.
+- If you enable consumption, preserve full assistant content before middleware filters it.
 
 ## Pause and consume
 
-Set `consume: true` on a tool definition to remove its tool-call fragments. It defaults to `false`. Mixed Chat Completions chunks are copied only when filtering is necessary; their text, unregistered calls, choice metadata, usage, and Azure filtering data remain. Responses function-call entries for consuming tools are suppressed; response-wide completion metadata remains. Gemini removes handled function-call parts while retaining surrounding candidate metadata and unrelated parts. Claude suppresses handled client tool start/argument/stop events while retaining message-wide events and other blocks.
+Set `consume: true` to remove a tool's call fragments. The default is `false`.
 
-Paused middleware forwards original entries, runs no tools, and emits no tool lifecycle events. Calls whose fragments cross a pause are skipped even if resumed before completion. Unregistering stops dispatch and consumption of subsequent fragments. In-flight handlers already started are allowed to finish; abort the middleware to interrupt Effects. The function chosen at the start of `invoke()` is stable through validation and execution. A pause/resume entirely between two pulls cannot be observed by the adapter.
+| Protocol         | Consumption behavior                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Completions | Copies mixed chunks only when filtering is necessary. Preserves text, unregistered calls, choice metadata, usage, and Azure filtering data. |
+| Responses        | Suppresses function-call entries for consuming tools. Preserves response-wide completion metadata.                                          |
+| Gemini           | Removes handled function-call parts. Preserves candidate metadata and unrelated parts.                                                      |
+| Claude           | Suppresses handled client tool start/argument/stop events. Preserves message-wide events and other blocks.                                  |
 
-Stream state is isolated per `middleware()` iterator. Registration is checked at dispatch time. No executions are shared or deduplicated across separate streams; replaying a stream can run its tools again.
+Paused middleware forwards original entries without running tools or emitting tool lifecycle events. It skips calls whose fragments cross a pause, even if you resume before completion. The adapter cannot observe a pause/resume entirely between two pulls.
+
+Unregistering stops dispatch and consumption of subsequent fragments. It allows handlers that already started to finish. Abort middleware to interrupt Effects. `invoke()` uses the function selected at its start throughout validation and execution.
+
+Each `middleware()` iterator has isolated stream state. Invoker checks registration at dispatch time. Separate streams do not share or deduplicate executions. Replaying a stream can run its tools again.
 
 ## Effect execution and services
 
@@ -269,9 +337,16 @@ const result = await Effect.runPromise(
 );
 ```
 
-`invoke()` is lazy and returns `Effect<ToolResult, ToolError, Requirements>`. Argument validation failures, opt-in result validation failures, thrown errors, rejected promises, failed/defective Effects, and serialization failures stay in the typed error channel. Middleware settles tool failures and continues reading. Source, adapter, and custom-runner failures emit `onStreamError` and propagate to the consumer. Interrupted execution preserves Effect interruption and emits `CANCELLED` lifecycle events.
+`invoke()` is lazy and returns `Effect<ToolResult, ToolError, Requirements>`. Its typed error channel includes:
 
-Declare services on the instance and provide a typed runner:
+- Argument validation failures and enabled result validation failures.
+- Thrown errors and rejected promises.
+- Failed or defective Effects.
+- Serialization failures.
+
+Middleware settles tool failures and continues reading. Source, adapter, and custom-runner failures emit `onStreamError` and propagate to the consumer. Interrupted execution preserves Effect interruption and emits `CANCELLED` lifecycle events.
+
+Declare services on the instance. Provide a typed runner:
 
 ```ts
 import { Context, Effect } from "effect";
@@ -304,7 +379,7 @@ withDatabase.register({
 });
 ```
 
-A default `Invoker` rejects handlers with unprovided service requirements at compile time. Supply all instance requirements before running `invoke()` directly.
+A default `Invoker` rejects handlers with missing service requirements at compile time. Supply all instance requirements before executing `invoke()` directly.
 
 ## Events and errors
 
@@ -320,11 +395,28 @@ Each subscription returns an unsubscribe function. Convenience methods and `on("
 | `onListenerError`       | `{ event, error }`                                    |
 | `onStreamError`         | `{ error }`                                           |
 
-Observers run synchronously when emitted; returned promises are observed for rejection but are not awaited. Listener failures cannot break tools or other listeners. A failing `onListenerError` listener is contained without recursively emitting itself. Async observers can finish after iteration; perform essential result collection synchronously. Payloads are read-only in TypeScript; observers should not mutate them at runtime.
+Invoker calls observers synchronously when it emits an event. It observes returned promises for rejection but does not await them. Async observers can finish after iteration. Collect essential results synchronously.
 
-Success order: before validation → before call → success → after call. Validation failures omit the before-call event. Middleware ignores unknown tools and disabled calls; direct `invoke()` returns `NOT_REGISTERED` or `PAUSED` failures instead.
+Listener failures cannot break tools or other listeners. Failures in `onListenerError` listeners do not emit another `onListenerError`. TypeScript marks payloads read-only. Observers should not mutate them at runtime.
 
-`ToolError` exposes `code`, `message`, and `detail` (the original exception or Zod validation error). Codes are `NOT_REGISTERED`, `PAUSED`, `INVALID_JSON`, `INVALID_ARGUMENTS`, `HANDLER_FAILED`, `INVALID_RESULT`, `SERIALIZATION_FAILED`, `INCOMPLETE_CALL`, `ARGUMENT_LIMIT`, `CALL_LIMIT`, and `CANCELLED`. Failure `content` contains a success flag, code, and generic message; original exception details stay local. Success `content` is the JSON envelope described above. Circular values and BigInts fail serialization.
+Successful calls emit events in this order:
+
+1. `onBeforeArgValidation`
+2. `onBeforeToolCall`
+3. `onToolCallSuccess`
+4. `onAfterToolCall`
+
+Validation failures omit `onBeforeToolCall`. Middleware ignores unknown tools and disabled calls. Direct `invoke()` instead returns `NOT_REGISTERED` or `PAUSED` failures.
+
+`ToolError` exposes `code`, `message`, and `detail`. The `detail` field contains the original exception or Zod validation error. Error codes are:
+
+- `NOT_REGISTERED`, `PAUSED`
+- `INVALID_JSON`, `INVALID_ARGUMENTS`, `INVALID_RESULT`
+- `HANDLER_FAILED`, `SERIALIZATION_FAILED`
+- `INCOMPLETE_CALL`, `ARGUMENT_LIMIT`, `CALL_LIMIT`
+- `CANCELLED`
+
+Failure `content` contains a success flag, code, and generic message. Original exception details stay local. Success `content` uses the JSON envelope described above. Circular values and BigInts fail serialization.
 
 ## Limits, cancellation, and adapters
 
@@ -338,11 +430,21 @@ const controller = new AbortController();
 const wrapped = bounded.middleware(stream, { signal: controller.signal });
 ```
 
-Limits must be positive integers. Argument limits clear the buffered arguments and report an error at completion. Exceeding the pending-call limit fails tracked calls and stops buffering new calls for that stream; original entries keep flowing. Built-in limits apply to streamed arguments, including unknown calls. Direct invocation accepts already-complete input.
+Limits must be positive integers. They apply to streamed arguments, including unknown calls. Direct invocation accepts complete input.
 
-Aborting interrupts active Effects and closes the source when iteration resumes. Effect-based HTTP operations can cooperate with interruption. Plain synchronous functions and already-started promises cannot be forcibly stopped. To unblock a pending network read, also pass the same signal to the SDK request. Breaking iteration closes the underlying iterator and abandons incomplete calls without executing them.
+- Exceeding the argument limit clears buffered arguments and reports an error at completion.
+- Exceeding the pending-call limit fails tracked calls and stops buffering new calls for that stream. Middleware still forwards original entries.
 
-All three adapter factories are exported from `invoker`. To support another protocol, implement a `StreamAdapter`, which creates a new session per stream. Its `push(entry, enabled, consume)` returns `{ entry, calls, consumed? }`: normalized **complete** `ToolCall`s, the forwarded entry, and an optional suppression flag. `finish()` reports incomplete pending calls using `call.error`. A `ProviderAdapter<Tools, Result>` additionally implements `tools(schemas)` and `result(outcome)` for provider declarations and response formatting.
+Aborting interrupts active Effects and closes the source when iteration resumes. Effect-based HTTP operations can cooperate with interruption. Invoker cannot forcibly stop plain synchronous functions or promises that already started. To unblock a pending network read, also pass the signal to the SDK request.
+
+Ending iteration early closes the underlying iterator. Incomplete calls never execute.
+
+`invoker` exports all three adapter factories. For another protocol, implement a `StreamAdapter` that creates a session per stream:
+
+- `push(entry, enabled, consume)` returns `{ entry, calls, consumed? }`: the forwarded entry, normalized **complete** `ToolCall`s, and an optional suppression flag.
+- `finish()` reports incomplete pending calls through `call.error`.
+
+A `ProviderAdapter<Tools, Result>` also implements `tools(schemas)` for declarations and `result(outcome)` to format results.
 
 ## Development
 
@@ -351,16 +453,24 @@ vp install
 vp run check   # formatting, lint, TypeScript 6 + Svelte checks
 vp test        # offline unit/stream tests
 vp run build  # Vite+ Pack ESM build + declaration generation
-vp pm pack    # npm tarball; runs prepack
+vp pm pack    # npm tarball (runs prepack)
 ```
 
-Type checking and declaration generation use TypeScript 6. Vite+ manages builds, tests, formatting, linting, and pnpm. Runtime tests and compile-only SDK/type contracts require no credentials or live API requests.
+Type checks and declaration generation use TypeScript 6. Vite+ manages builds, tests, formatting, linting, and pnpm. Runtime tests and compile-only SDK/type contracts need no credentials or live API requests.
 
 ## Demo website
 
-The [Svelte 5 + Tailwind 4 site](https://wingsmc.github.io/invoker/) uses the actual library with the internal mock AI service. SVG packets animate the tool-routing diagram; the playground displays streamed arguments, validation, results, and lifecycle events. Syntax-highlighted code tabs show registration, SDK streaming, events, and mock usage, with provider examples and result documentation. It works without credentials or a backend, supports narrow screens and reduced motion, and makes no external font or AI requests.
+The [Svelte 5 + Tailwind 4 site](https://wingsmc.github.io/invoker/) runs the library with an internal mock AI service.
 
-The size badge is injected through `import.meta.env.VITE_INVOKER_GZIP_KB` by Vite configuration. It measures gzip bytes of the concrete `dist/index.js` build in decimal KB, rounded to one decimal place. External peers, TypeScript declarations, and source maps are excluded; this is the full ESM library artifact, not the npm tarball. Development and site build scripts build the library first, so the badge matches that build. Restart site development after library changes to refresh the measurement.
+- SVG packets animate the tool-routing diagram.
+- The playground shows streamed arguments, validation, results, and lifecycle events.
+- Syntax-highlighted tabs show registration, SDK streaming, events, mock usage, provider examples, and result documentation.
+
+The site needs no credentials or backend. It supports narrow screens and reduced motion, with no external font or AI requests.
+
+Vite supplies the size badge through `import.meta.env.VITE_INVOKER_GZIP_KB`. The badge measures gzip bytes of `dist/index.js` in decimal KB, rounded to one decimal place. It covers the full ESM artifact, not the npm tarball. It excludes external peers, TypeScript declarations, and source maps.
+
+Development and site build scripts build the library first, so the badge matches that build. Restart site development after library changes to refresh the measurement.
 
 ```sh
 vp run dev           # local demo with hot reload (http://127.0.0.1:5173)
@@ -368,9 +478,22 @@ vp run site:check    # check Svelte and TypeScript
 vp run site:build    # static site in site-dist/
 vp run site:preview  # preview the production site
 vp exec playwright install chromium
-vp run test:e2e      # production-site browser checks; build it first
+vp run test:e2e      # production-site browser checks (build the site first)
 ```
 
-`testing/mock-ai.ts` is shared by unit tests and the website, and is excluded from the npm package. `MockAIService.stream()` scripts Chat Completions, Responses, Gemini, or Claude events, including text, tool calls, usage, invalid arguments, truncation, a simulated network failure (`failAfter`), and abortable delays. OpenAI/Claude formats exercise fragmented/interleaved JSON; Gemini emits complete function-call parts. Defaults are deterministic and zero-latency for tests. `site/demo.ts` connects those streams to real registered Effect handlers. The UI's second mock response is scripted from their actual outcomes.
+Unit tests and the website share `testing/mock-ai.ts`. The npm package excludes it. `MockAIService.stream()` scripts Chat Completions, Responses, Gemini, or Claude events with:
 
-The [GitHub Pages workflow](.github/workflows/pages.yml) checks pull requests and builds/deploys pushes to `main` (also supports manual dispatch). It uses `site-dist/` as the Pages artifact, separate from the npm library's `dist/`. Relative asset URLs support repository Pages paths and custom domains. Set the repository's **Settings → Pages → Source** to **GitHub Actions** once, then push to `main`. The expected project URL is https://wingsmc.github.io/invoker/.
+- Text, tool calls, and usage.
+- Invalid arguments and truncation.
+- Simulated network failures (`failAfter`) and abortable delays.
+
+OpenAI and Claude formats test fragmented and interleaved JSON. Gemini emits complete function-call parts. Test defaults are deterministic, with zero latency. `site/demo.ts` connects these streams to registered Effect handlers. The UI scripts its second mock response from their actual outcomes.
+
+The [GitHub Pages workflow](.github/workflows/pages.yml) checks pull requests, builds and deploys pushes to `main`, and supports manual dispatch. Pages uses `site-dist/`, separate from the library's `dist/`. Relative asset URLs support repository Pages paths and custom domains.
+
+To deploy:
+
+1. Set **Settings → Pages → Source** to **GitHub Actions** once.
+2. Push to `main`.
+
+The expected URL is https://wingsmc.github.io/invoker/.
